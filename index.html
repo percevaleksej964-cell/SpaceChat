@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SpaceChat & Video (WebRTC)</title>
+    <style>
+        body {
+            background-color: #121212;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        h2 {
+            margin-bottom: 5px;
+        }
+        .status {
+            color: #ff3b30;
+            font-weight: bold;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .status.connected {
+            color: #34c759;
+        }
+        .controls {
+            background-color: #1e1e1e;
+            padding: 10px 20px;
+            border-radius: 30px;
+            display: flex;
+            gap: 15px;
+            margin-bottom: 25px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+        }
+        .btn {
+            background: none;
+            border: none;
+            color: #b0b0b0;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            padding: 8px 12px;
+            border-radius: 20px;
+            transition: 0.2s;
+        }
+        .btn:hover {
+            background-color: #2a2a2a;
+            color: #fff;
+        }
+        .btn.hangup {
+            color: #ff3b30;
+        }
+        .btn.hangup:hover {
+            background-color: rgba(255,59,48,0.2);
+        }
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            width: 100%;
+            max-width: 1000px;
+        }
+        .video-box {
+            background-color: #000000;
+            border: 2px solid #1e1e1e;
+            border-radius: 8px;
+            aspect-ratio: 16 / 10;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .video-box:hover {
+            transform: scale(1.01);
+            border-color: #3a3a3a;
+        }
+        .video-box video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .label {
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            background-color: rgba(0,0,0,0.6);
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .label::before {
+            content: '';
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+        .label.blue::before { background-color: #007aff; }
+        .label.green::before { background-color: #34c759; }
+        .label.purple::before { background-color: #af52de; }
+        
+        .id-bar {
+            margin-top: 20px;
+            font-size: 14px;
+            color: #aaa;
+        }
+        .id-bar strong { color: #fff; }
+        
+        .fullscreen {
+            position: fixed !important;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            z-index: 9999;
+            max-width: none !important;
+            aspect-ratio: auto !important;
+            border: none !important;
+            border-radius: 0 !important;
+        }
+    </style>
+    <!-- Подключаем клиентские библиотеки для связи (Socket.io) -->
+    <script src="https://socket.io"></script>
+</head>
+<body>
+
+    <h2>SpaceChat & Video (WebRTC)</h2>
+    
+    <div class="status" id="statusLine">
+        <span id="statusIcon">❌</span> <span id="statusText">Соединение разорвано. Переподключение...</span>
+    </div>
+
+    <div class="controls">
+        <button class="btn" id="btnVideo">📞 Видеозвонок</button>
+        <button class="btn" id="btnAudio">🎤 Голосовой</button>
+        <button class="btn" id="btnScreen">🖥 Экран</button>
+        <button class="btn hangup" id="btnHangup">❌ Сбросить</button>
+    </div>
+
+    <div class="grid">
+        <div class="video-box" onclick="toggleFullscreen(this)">
+            <div class="label blue">📷 Вы (Моя камера)</div>
+            <video id="localVideo" autoplay muted playsinline></video>
+        </div>
+        <div class="video-box" onclick="toggleFullscreen(this)">
+            <div class="label blue">🖥 Вы (Мой экран)</div>
+            <video id="localScreen" autoplay muted playsinline></video>
+        </div>
+        <div class="video-box" onclick="toggleFullscreen(this)">
+            <div class="label green">👤 Собеседник (Камера)</div>
+            <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+        <div class="video-box" onclick="toggleFullscreen(this)">
+            <div class="label purple">🖥 Собеседник (Экран)</div>
+            <video id="remoteScreen" autoplay playsinline></video>
+        </div>
+    </div>
+
+    <div class="id-bar">
+        👉 Дважды кликните по любому из 4-х окон, чтобы открыть его на весь экран. Повторный двойной клик или Esc — выход.
+    </div>
+    
+    <div class="id-bar" style="margin-top: 10px;">
+        Ваш ID: <strong id="myId">…</strong> | ID собеседника: <input type="text" id="peerIdInput" style="background:#222; border:1px solid #44; color:#fff; padding:3px; border-radius:4px;"> 
+        <button id="btnConnect" style="background:#007aff; border:none; color:#fff; padding:4px 10px; border-radius:4px; cursor:pointer;">➤ Отправить</button>
+    </div>
+
+    <script>
+        // ==========================================
+        // НАСТРОЙКА АДРЕСА СЕРВЕРА С ТУННЕЛЕМ TUNA
+        // ==========================================
+        const TUNA_ADDRESS = 'ваш-адрес-из-tuna.tuna.am'; // <-- ЗАМЕНИТЕ ЭТОТ АДРЕС НА ВАШ АДРЕС ИЗ TUNA DESKTOP!
+
+        // Автоматический выбор протокола подключения (Безопасный для GitHub Pages / Локальный для localhost)
+        const isHosted = window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1';
+        const serverUrl = isHosted ? `https://${TUNA_ADDRESS}` : 'http://localhost:8000';
+
+        // Инициализация соединения с вашим бэкендом
+        const socket = io(serverUrl, { secure: isHosted });
+
+        const statusLine = document.getElementById('statusLine');
+        const statusIcon = document.getElementById('statusIcon');
+        const statusText = document.getElementById('statusText');
+        const myIdDisplay = document.getElementById('myId');
+
+        // Обработка событий сети
+        socket.on('connect', () => {
+            statusLine.className = 'status connected';
+            statusIcon.innerText = '⏳';
+            statusText.innerText = 'Подключение к серверу установлено. Ожидание сигналов...';
+            myIdDisplay.innerText = socket.id;
+        });
+
+        socket.on('disconnect', () => {
+            statusLine.className = 'status';
+            statusIcon.innerText = '❌';
+            statusText.innerText = 'Соединение разорвано. Переподключение...';
+            myIdDisplay.innerText = '…';
+        });
+
+        // Функция полноэкранного режима по клику
+        function toggleFullscreen(element) {
+            element.classList.toggle('fullscreen');
+        }
+
+        // Выход из фуллскрина по кнопке ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.video-box').forEach(box => box.classList.remove('fullscreen'));
+            }
+        });
+
+        // Логика стримов WebRTC (заглушки для привязки к кнопкам вашего интерфейса)
+        let localStream;
+        const localVideo = document.getElementById('localVideo');
+
+        document.getElementById('btnVideo').addEventListener('click', async () => {
+            try {
+                localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                localVideo.srcObject = localStream;
+                if(statusLine.classList.contains('connected')) {
+                    statusText.innerText = 'Камера включена. Готов к звонку.';
+                }
+            } catch (err) {
+                alert('Не удалось получить доступ к камере: ' + err.message);
+            }
+        });
+
+        document.getElementById('btnHangup').addEventListener('click', () => {
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localVideo.srcObject = null;
+                statusText.innerText = 'Звонок сброшен.';
+            }
+        });
+    </script>
+</body>
+</html>
